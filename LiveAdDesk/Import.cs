@@ -94,19 +94,96 @@ public static class ExcelImport
 public static class OcrReader
 {
     public static string Languages()=>string.Join("、",OcrEngine.AvailableRecognizerLanguages.Select(l=>l.LanguageTag));
-    public static async Task<string> Read(string path)
+    public static async Task<string> Read(string path,bool enlarge=false)
+        => Text((await Recognize(path,enlarge)).Result);
+
+    static string Text(OcrResult result)=>string.Join(Environment.NewLine,result.Lines.Select(line=>line.Text));
+
+    static async Task<(OcrResult Result,double Scale)> Recognize(string path,bool enlarge)
     {
         var lang=OcrEngine.AvailableRecognizerLanguages.FirstOrDefault(l=>l.LanguageTag.StartsWith("zh"));
         if(lang==null) throw new InvalidOperationException("Windows未安装中文OCR。请在设置→时间和语言→语言和区域添加中文及文字识别组件。手动快照、Excel导入仍可使用。");
         var engine=OcrEngine.TryCreateFromLanguage(lang)??throw new InvalidOperationException("无法启动Windows OCR。");
         var file=await StorageFile.GetFileFromPathAsync(Path.GetFullPath(path)); using var stream=await file.OpenReadAsync();
         var decoder=await BitmapDecoder.CreateAsync(stream);
+        if((long)decoder.PixelWidth*decoder.PixelHeight>40_000_000)throw new InvalidDataException("截图分辨率过大，请裁剪数据区域后重试。");
         var max=OcrEngine.MaxImageDimension;
-        double scale=Math.Min(1,Math.Min((double)max/decoder.PixelWidth,(double)max/decoder.PixelHeight));
+        double scale=Math.Min(enlarge?2:1,Math.Min((double)max/decoder.PixelWidth,(double)max/decoder.PixelHeight));
         var transform=new BitmapTransform{ScaledWidth=(uint)Math.Max(1,decoder.PixelWidth*scale),ScaledHeight=(uint)Math.Max(1,decoder.PixelHeight*scale)};
         using var bmp=await decoder.GetSoftwareBitmapAsync(BitmapPixelFormat.Bgra8,BitmapAlphaMode.Premultiplied,transform,ExifOrientationMode.RespectExifOrientation,ColorManagementMode.DoNotColorManage);
-        var result=await engine.RecognizeAsync(bmp);
-        return string.Join(Environment.NewLine,result.Lines.Select(l=>l.Text));
+        return (await engine.RecognizeAsync(bmp),scale);
+    }
+
+    public static async Task<string> ReadPlanForm(string path)
+    {
+        var full=await Read(path,enlarge:true);
+        using var bitmap=new System.Drawing.Bitmap(path);
+        if(bitmap.Height<360)return full;
+        var top=new System.Drawing.Rectangle(0,0,bitmap.Width,bitmap.Height/5);
+        var header=await ReadCrop(bitmap,top);
+        return full+"\n—\n"+header.Enlarged;
+    }
+
+    public static async Task<(string Raw,Dictionary<string,decimal> Candidates)> ReadDataForm(string path)
+    {
+        var (result,scale)=await Recognize(path,true);
+        var raw=Text(result);
+        static string Summary(OcrResult scan)
+        {
+            var chart=scan.Lines.Where(line=>Regex.Replace(line.Text,@"\s+","")=="趋势对比")
+                .SelectMany(line=>line.Words).Select(word=>word.BoundingRect.Y).DefaultIfEmpty(double.MaxValue).Min();
+            return string.Join(Environment.NewLine,scan.Lines.Where(line=>line.Words.Any(word=>word.BoundingRect.Y<chart)).Select(line=>line.Text));
+        }
+        var chartTop=result.Lines.Where(line=>Regex.Replace(line.Text,@"\s+","")=="趋势对比")
+            .SelectMany(line=>line.Words).Select(word=>word.BoundingRect.Y).DefaultIfEmpty(double.MaxValue).Min();
+        var first=Candidates(Summary(result));
+        var second=Candidates(Summary((await Recognize(path,false)).Result));
+        var values=first.Where(pair=>second.TryGetValue(pair.Key,out var other)&&other==pair.Value)
+            .ToDictionary(pair=>pair.Key,pair=>pair.Value);
+        using var bitmap=new System.Drawing.Bitmap(path);
+        var labels=new Dictionary<string,string>
+        {
+            ["消耗"]="消耗",["全域成交金额"]="GMV",["全域成单人数"]="人数",["全域成交订单数"]="订单",
+            ["退款金额"]="退款",["进房人数"]="进房",["商品点击人数"]="点击"
+        };
+        var cropped=new Dictionary<string,List<decimal>>();
+        var attempts=new Dictionary<string,int>();
+        foreach(var line in result.Lines)
+        {
+            var label=Regex.Replace(line.Text,@"\s+","");
+            if(!labels.TryGetValue(label,out var key)||line.Words.Count==0)continue;
+            var boxes=line.Words.Select(word=>word.BoundingRect).ToArray();
+            if(boxes.Min(box=>box.Y)>=chartTop||attempts.GetValueOrDefault(key)>=2)continue;
+            attempts[key]=attempts.GetValueOrDefault(key)+1;
+            if(!cropped.TryGetValue(key,out var readings))cropped[key]=readings=[];
+            var height=Math.Max(8,(int)Math.Ceiling(boxes.Max(box=>box.Height)/scale));
+            var x=Math.Clamp((int)(boxes.Min(box=>box.X)/scale)-height-6,0,bitmap.Width-1);
+            var y=Math.Clamp((int)(boxes.Min(box=>box.Y)/scale)-height-10,0,bitmap.Height-1);
+            var width=Math.Max(height*22+8,(int)Math.Ceiling(boxes.Max(box=>box.Right)/scale)-x+12);
+            var area=new System.Drawing.Rectangle(x,y,Math.Min(width,bitmap.Width-x),Math.Min(height*10,bitmap.Height-y));
+            var crop=await ReadCrop(bitmap,area);
+            foreach(var text in new[]{crop.Original,crop.Enlarged})
+                if(Candidates(text).TryGetValue(key,out var number))readings.Add(number);
+        }
+        foreach(var (key,readings) in cropped)
+        {
+            values.Remove(key);
+            var distinct=readings.Distinct().ToArray();
+            if(distinct.Length==1)values[key]=distinct[0];
+        }
+        return (raw,values);
+    }
+
+    static async Task<(string Original,string Enlarged)> ReadCrop(System.Drawing.Bitmap bitmap,System.Drawing.Rectangle area)
+    {
+        using var crop=bitmap.Clone(area,bitmap.PixelFormat);
+        var temp=Path.Combine(Path.GetTempPath(),Guid.NewGuid().ToString("N")+".png");
+        try
+        {
+            crop.Save(temp,System.Drawing.Imaging.ImageFormat.Png);
+            return (await Read(temp),await Read(temp,enlarge:true));
+        }
+        finally{File.Delete(temp);}
     }
     public static Dictionary<string,decimal> Candidates(string text)
     {
@@ -119,6 +196,7 @@ public static class OcrReader
             if(key==null||l.Contains("券助力")) continue;
             var start=Regex.Match(l,@"[+-]?\d");var tail=start.Success?l[start.Index..]:"";
             if(tail.Length==0&&i+1<lines.Length)tail=lines[i+1];
+            if(tail.Contains(',')&&!Regex.IsMatch(tail,@"\A[+-]?[0-9]{1,3}(?:,[0-9]{3})+(?:\.[0-9]+)?(?:万|亿|千)?(?:元|人|次|单)?\z"))continue;
             // ponytail: 仅接收完整数值候选，未知单位不截成一个看似正确的小数。
             try{var n=ExcelImport.Number(tail);if(n is >=0)result.TryAdd(key,n.Value);}catch(InvalidDataException){}
         }

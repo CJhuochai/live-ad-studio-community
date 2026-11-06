@@ -15,7 +15,7 @@ static class DecisionCommands
                 if(p.TryGetProperty("refPrice",out var rp))price=rp.ValueKind==JsonValueKind.Null?null:rp.GetDecimal();
                 if(p.TryGetProperty("refRetention",out var rr))retention=rr.ValueKind==JsonValueKind.Null?null:rr.GetDecimal();
                 if(price<0||retention<0||retention>100)throw new InvalidDataException("参考价格不可为负，预估保留率为0—100%。");
-                if(r.Business.PlanId.Length>0&&b.PlanId!=r.Business.PlanId&&(r.Finance.Snapshots.Count>0||r.MaterialBatches.Count>0||r.Finance.Orders.Count>0))throw new InvalidDataException("已有数据的场次不能更换计划ID；请为其他计划新建场次。");
+                EnsurePlanChangeAllowed(r,b.PlanId);
                 if(b.PlanId!=r.Business.PlanId)f=new();
                 message="经营目标已保存；不会修改广告后台。";break;
             case "facts":
@@ -42,6 +42,13 @@ static class DecisionCommands
         r.Business=b;r.Facts=f;r.MaterialReviews=reviews;r.FollowUps=actions;r.Finance.Price=price;r.Finance.Retention=retention;
         return message;
     }
+    internal static void EnsurePlanChangeAllowed(Room room,string planId)
+    {
+        if(room.Business.PlanId.Length>0 && planId!=room.Business.PlanId &&
+            (room.Finance.Snapshots.Count>0 || room.MaterialBatches.Count>0 || room.Finance.Orders.Count>0))
+            throw new InvalidDataException("已有数据的场次不能更换计划ID；请为其他计划新建场次。");
+    }
+
     public static string ObservationKey(string imageHash,IReadOnlyDictionary<string,decimal> candidates)
         =>candidates.ContainsKey("消耗")&&(candidates.ContainsKey("GMV")||candidates.ContainsKey("人数"))
         ?string.Join("|",candidates.OrderBy(x=>x.Key).Select(x=>x.Key+"="+x.Value.ToString(System.Globalization.CultureInfo.InvariantCulture)))

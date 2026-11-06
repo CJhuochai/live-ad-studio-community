@@ -27,3 +27,41 @@ function openMaterialReview(i){const r=S.materials.rows[i];let body='<p>'+esc(r.
 const previousHistoryPage=historyPage;
 historyPage=function(){return '<div class="sectiontitle">让每次调整都有复查结果</div><div class="toolbar"><button class="btn primary" onclick="openFollowUp()">＋ 新建行动复查</button></div>'+((S.followUps||[]).map((v,i)=>'<div class="card"><div class="cardtop"><h2>'+esc(v.item.title)+'</h2><span class="tag">'+esc(v.result.status)+'</span></div><div class="body"><p class="small">'+esc(v.item.reason||'尚未填写依据')+'</p><div class="comparison"><div><span>执行前 · '+esc(v.item.metric)+'</span><b>'+num(v.result.beforeValue)+'</b>'+(v.result.before?'<small>'+dt(v.result.before.start)+' → '+dt(v.result.before.end)+'</small>':'')+'</div><span>→</span><div><span>执行后 · '+esc(v.item.metric)+'</span><b>'+num(v.result.afterValue)+'</b>'+(v.result.after?'<small>'+dt(v.result.after.start)+' → '+dt(v.result.after.end)+'</small>':'')+'</div></div><p class="small">'+esc(v.result.note)+'</p>'+(v.item.assessment?'<p>人工结论：'+esc(v.item.assessment)+'</p>':'')+'<button class="textbtn" onclick="openFollowUp('+i+')">记录执行 / 复查 →</button></div></div>').join('')||'<div class="card"><div class="empty">先记录一个动作，再补充执行前后的已确认快照。<br>前后变化不自动等于该动作造成的效果。</div></div>')+previousHistoryPage()};
 function openFollowUp(index=null,prefill={}){const old=index===null?null:S.followUps[index]?.item;if(old?.reviewedAt){showModal('已人工复查 · 只读','<div class="formnote">复查记录已锁定；后续调整请新建行动。</div>'+['title','reason','expected','stopCondition','confounders','assessment'].map((k,i)=>'<p><b>'+['行动','依据','预期','退出条件','同期变化','人工结论'][i]+'</b><br>'+esc(old[k]||'未填写')+'</p>').join('')+'<div class="small">执行：'+dt(old.executedAt)+' · 复查：'+dt(old.reviewedAt)+'</div>',null);return}const a=old||{id:crypto.randomUUID().replaceAll('-',''),title:'',reason:'',expected:'',stopCondition:'',confounders:'',executedAt:null,reviewMinutes:30,metric:'支付ROI',assessment:'',archived:false,...prefill};const body='<div class="formnote">先记录建议；实际执行后再填执行时间。比较需要前后各两条已确认快照，并覆盖观察窗。不会自动调整广告。</div><div class="formgrid">'+field('行动内容','actionTitle',a.title,'text',true)+textArea('依据：哪些事实支持这个动作','reason',a.reason,1500)+field('实际执行时间（未执行留空）','executedAt',a.executedAt?.slice(0,19),'datetime-local')+field('执行后观察分钟（本地约定）','reviewMinutes',a.reviewMinutes,'number')+selectField('主要复查指标','actionMetric',a.metric,['支付ROI','人数成本','消耗速度'])+textArea('希望看到什么变化','expected',a.expected,1000)+textArea('何时停止追加 / 退出条件','stopCondition',a.stopCondition,1000)+textArea('同期还有哪些变化：话术、商品、自然流量等','confounders',a.confounders,1500)+textArea('人工复查结论；数据不足也应如实注明','assessment',a.assessment,2000)+'</div>'+checkField('markReviewed','已核对完整区间，记录为人工复查完成',false)+checkField('archived','归档这项行动（须填写原因，不代表动作有效）',a.archived);showModal(old?'执行与复查':'建立一个可验证的行动',body,()=>attempt(()=>{const item={...a,title:val('actionTitle'),reason:val('reason'),executedAt:val('executedAt')||null,reviewMinutes:nullable('reviewMinutes'),metric:val('actionMetric'),expected:val('expected'),stopCondition:val('stopCondition'),confounders:val('confounders'),assessment:val('assessment'),archived:checked('archived')};submitDialog('followUp',{item,markReviewed:checked('markReviewed')})}))}
+function openScreenshotGuide() {
+  showModal('截图填表', `<div id="screenshotGuide">
+    <div class="formnote">截图由本机识别。核对后才写入当前场次。</div>
+    <div class="formsection">开播前 · 计划设置</div>
+    <div class="small">先截本地推「计划概览」顶部，保留计划ID、日预算和ROI目标或人数成本目标。字段看不全时，再截「计划详情」里的投放目标和预算设置。两张图请来自同一计划。</div>
+    <div class="actionrow">
+      <button class="btn primary" onclick="act('readFormScreenshot',{kind:'plan'})">选计划截图</button>
+      <button class="btn" onclick="act('readFormScreenshot',{kind:'plan',clipboard:true})">识别剪贴板</button>
+    </div>
+    <div class="formsection">开播后 · 累计数据</div>
+    <div class="small">截本地推「数据」页的概览卡片，保留计划ID、日期范围、累计消耗、全域成交金额和成单人数。尽量裁掉下方趋势图。</div>
+    <div class="actionrow">
+      <button class="btn" onclick="act('readFormScreenshot',{kind:'snapshot'})">选数据截图</button>
+      <button class="btn" onclick="act('readFormScreenshot',{kind:'snapshot',clipboard:true})">识别剪贴板</button>
+    </div></div>`, null);
+}
+
+function openPlanScreenshot(message) {
+  if (!S || message.roomId !== S.selected) return;
+  const {fields, review} = message.preview;
+  const notes = review.map(text => '<div class="formnote">'+esc(text)+'</div>').join('');
+  const body = '<div class="formnote">对照原图核对识别结果。留空的字段沿用本场设置。切换计划时，旧预算和目标值会清空。</div>'
+    + notes + '<div class="formgrid">'
+    + field('计划ID', 'screenPlanId', fields.planId)
+    + selectField('优化目标', 'screenGoal', fields.goal ?? '待补充', ['待补充', '成交金额', '成单人数'])
+    + field('日预算（元）', 'screenBudget', fields.budget, 'number')
+    + field('目标 ROI 或人数成本', 'screenTarget', fields.target, 'number') + '</div>'
+    + checkField('planScreenshotConfirmed', '我已核对当前场次、计划ID和目标口径', false);
+  showModal('核对计划设置', body, () => attempt(() => {
+    if (!document.getElementById('f_planScreenshotConfirmed').checked) throw Error('请先核对截图');
+    const goal = val('screenGoal');
+    submitDialog('savePlanScreenshot', {
+      roomId: message.roomId, confirmed: true,
+      plan: {planId: val('screenPlanId') || null, goal: goal === '待补充' ? null : goal,
+        budget: nullable('screenBudget'), target: nullable('screenTarget')}
+    });
+  }));
+}

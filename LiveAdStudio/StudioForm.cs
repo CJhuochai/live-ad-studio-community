@@ -79,6 +79,7 @@ sealed class StudioForm : Form
                     if(action=="pause"){Stop("手动暂停");Publish();return;}
                     if(action=="cancel"){Stop("取消当前操作");operation?.Cancel();Publish();return;}
                     if(action=="update"&&monitoring){Toast("请先暂停盯盘，再更新程序。",true);return;}
+                    if(action=="savePlanScreenshot"&&monitoring){Toast("请先暂停盯盘，再修改场次计划设置。",true);return;}
                     await Run(()=>Command(action,message.TryGetProperty("data",out var p)?p.Clone():default));
                 }
                 catch(Exception ex){Toast(SafeError(ex),true);}
@@ -167,6 +168,12 @@ sealed class StudioForm : Form
                 Event(message);Save();Post(new{type="dialogSaved"});Toast(message);break;
             case "materialQuery":var query=Text("query");if(query.Length>100)throw new InvalidDataException("搜索条件最多100字。");materialQuery=query;break;
             case "materials":ImportMaterials();break;
+            case "readFormScreenshot":
+                await ReadFormScreenshot(Text("kind"),p.TryGetProperty("clipboard",out var paste)&&paste.GetBoolean());
+                break;
+            case "savePlanScreenshot":
+                SavePlanScreenshot(Text("roomId"),p);
+                break;
             case "update":await UpdateAndRestart();break;
             case "login":Stop("连接账号");await auth.Login(t=>Post(new{type="progress",text=t}),Ct);await LoadModelsIfPossible();Toast("ChatGPT已连接，可以开始对话。");break;
             case "logout":Stop("退出账号");await auth.Disconnect(Ct);models=[];Toast("已退出本机授权。");break;
@@ -249,6 +256,72 @@ sealed class StudioForm : Form
         finance.Changes.Add(new(){Text=$"设置调整：目标{old.Goal}→{finance.Goal}；预算{Calc.N(old.Budget)}→{Calc.N(finance.Budget)}；目标值{Calc.N(old.Target)}→{Calc.N(finance.Target)}；主推{old.Product}→{finance.Product}"});
         if(old.Account!=finance.Account||old.Day!=finance.Day||old.Start!=finance.Start||old.End!=finance.End)R.Facts=new();
         R.Finance=finance;R.CaptureSeconds=check.CaptureSeconds;R.AnalysisMinutes=check.AnalysisMinutes;R.RequestLimit=check.RequestLimit;capture.RevokeConsent();Stop("设置已更新，请确认后重新开始盯盘");Save();Toast("设置已保存。");
+    }
+    void SavePlanScreenshot(string roomId,JsonElement payload)
+    {
+        var room=R;
+        if(roomId!=room.Finance.Id||!payload.GetProperty("confirmed").GetBoolean())
+            throw new InvalidDataException("请确认当前场次和截图里的计划设置。");
+        var plan=payload.GetProperty("plan").Deserialize<PlanFields>(json)??throw new InvalidDataException("计划设置为空。");
+        var old=(room.Business.PlanId,room.Facts,room.Finance.Goal,room.Finance.Budget,room.Finance.Target,room.Events.ToList());
+        try
+        {
+            ScreenshotForm.ApplyPlan(room,plan);
+            Event($"截图核对设置：目标{old.Goal}→{room.Finance.Goal}，预算{Calc.N(old.Budget)}→{Calc.N(room.Finance.Budget)}，目标值{Calc.N(old.Target)}→{Calc.N(room.Finance.Target)}。");
+            Save();
+        }
+        catch
+        {
+            (room.Business.PlanId,room.Facts,room.Finance.Goal,room.Finance.Budget,room.Finance.Target,room.Events)=old;
+            throw;
+        }
+        capture.RevokeConsent();
+        Post(new{type="dialogSaved"});Toast("计划设置已保存。");
+    }
+    async Task ReadFormScreenshot(string kind,bool clipboard)
+    {
+        string? temp=null;
+        try
+        {
+            if(kind is not ("plan" or "snapshot"))throw new InvalidDataException("请选择截图用途。");
+            string[] files;
+            if(clipboard)
+            {
+                using var image=Clipboard.GetImage()??throw new InvalidDataException("剪贴板没有图片，请先截图。");
+                if((long)image.Width*image.Height>40_000_000)throw new InvalidDataException("截图分辨率过大，请先裁剪。");
+                temp=Path.Combine(Path.GetTempPath(),Guid.NewGuid().ToString("N")+".png");
+                image.Save(temp,System.Drawing.Imaging.ImageFormat.Png);
+                files=[temp];
+            }
+            else
+            {
+                using var picker=new OpenFileDialog{Filter="截图|*.png;*.jpg;*.jpeg;*.bmp",Multiselect=kind=="plan"};
+                if(picker.ShowDialog(this)!=DialogResult.OK)return;
+                files=picker.FileNames;
+            }
+            if(files.Length>(kind=="plan"?2:1))throw new InvalidDataException("一次最多选两张计划截图或一张数据截图。");
+            Toast("正在本机识别截图…");
+            foreach(var file in files)
+                if(new FileInfo(file).Length>12*1024*1024)throw new InvalidDataException("截图大于12MB，请先裁剪。");
+            if(kind=="snapshot")
+            {
+                var data=await OcrReader.ReadDataForm(files[0]);
+                Ct.ThrowIfCancellationRequested();
+                ScreenshotForm.CheckSnapshotPlan(data.Raw,R.Business.PlanId);
+                Post(new{type="snapshotScreenshot",candidates=data.Candidates,raw=data.Raw[..Math.Min(data.Raw.Length,6000)]});
+                return;
+            }
+            var pages=new List<string>();
+            foreach(var file in files)
+            {
+                Ct.ThrowIfCancellationRequested();
+                pages.Add(await OcrReader.ReadPlanForm(file));
+            }
+            Ct.ThrowIfCancellationRequested();
+            Post(new{type="planScreenshot",roomId=R.Finance.Id,preview=ScreenshotForm.ReadPlan(pages)});
+        }
+        catch(Exception e){Toast(SafeError(e),true);}
+        finally{if(temp is not null)File.Delete(temp);}
     }
     void ImportOrders()
     {

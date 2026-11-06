@@ -9,6 +9,7 @@ static class StudioChecks
         LiveAdConnect.Checks.Run(args[1]+".auth");
         UpgradeChecks.Run(args[1]+".upgrade");
         UpdateChecks.Run();
+        ScreenshotFormChecks.Run();
         var financeArgs = args.Length>=4
             ? new[]{"--self-test",args[2],args[3],args[1]+".finance"}
             : new[]{"--self-test",args[1]+".finance"};
