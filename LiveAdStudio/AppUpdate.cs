@@ -20,34 +20,27 @@ static class AppUpdate
 
     public static async Task<UpdateOffer?> CheckAsync()
     {
-        using var response = await Client.GetAsync($"https://api.github.com/repos/{Repository}/releases/latest");
+        using var response = await Client.GetAsync($"https://raw.githubusercontent.com/{Repository}/main/update.json");
         response.EnsureSuccessStatusCode();
         using var data = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
         return ReadOffer(data.RootElement, CurrentVersion);
     }
 
-    internal static UpdateOffer? ReadOffer(JsonElement release, Version installed)
+    internal static UpdateOffer? ReadOffer(JsonElement manifest, Version installed)
     {
-        if (release.GetProperty("draft").GetBoolean() || release.GetProperty("prerelease").GetBoolean()) return null;
-        var tag = release.GetProperty("tag_name").GetString();
-        if (tag is null || !tag.StartsWith('v') || !Version.TryParse(tag[1..], out var version) ||
-            version.Build < 0 || version.Revision >= 0 || tag != "v" + version.ToString(3)) return null;
+        var value = manifest.GetProperty("version").GetString();
+        if (!Version.TryParse(value, out var version) || version.Build < 0 ||
+            version.Revision >= 0 || value != version.ToString(3)) return null;
         if (new Version(version.Major, version.Minor, version.Build, 0) <= installed) return null;
 
+        var size = manifest.GetProperty("size").GetInt64();
+        var digest = manifest.GetProperty("sha256").GetString();
+        if (size is <= 0 or > MaxPackageBytes || digest is null ||
+            digest.Length != 64 || !digest.All(Uri.IsHexDigit)) return null;
+        var tag = "v" + version.ToString(3);
         var name = $"LiveAdStudio-{tag}-Win11-x64.zip";
-        var expectedUrl = $"https://github.com/{Repository}/releases/download/{tag}/{name}";
-        foreach (var asset in release.GetProperty("assets").EnumerateArray())
-        {
-            if (asset.GetProperty("name").GetString() != name || asset.GetProperty("state").GetString() != "uploaded") continue;
-            if (asset.GetProperty("browser_download_url").GetString() != expectedUrl) continue;
-            if (!asset.TryGetProperty("digest", out var digestProperty)) continue;
-            var digest = digestProperty.GetString();
-            var size = asset.GetProperty("size").GetInt64();
-            if (size is <= 0 or > MaxPackageBytes || digest is null || digest.Length != 71 ||
-                !digest.StartsWith("sha256:", StringComparison.Ordinal) || !digest[7..].All(Uri.IsHexDigit)) continue;
-            return new UpdateOffer(version, new Uri(expectedUrl), size, digest[7..]);
-        }
-        return null;
+        var url = new Uri($"https://github.com/{Repository}/releases/download/{tag}/{name}");
+        return new UpdateOffer(version, url, size, digest);
     }
 
     public static async Task PrepareAsync(UpdateOffer offer, string destination, CancellationToken cancellationToken)

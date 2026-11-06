@@ -25,9 +25,9 @@ Get-Content checks.txt,checks.txt.auth,checks.txt.upgrade
 
 ## 在线更新
 
-客户端启动时及运行期间每 15 分钟检查一次 GitHub Releases。发现版本更高且有 SHA-256 的正式 Windows 包时，右上角显示「更新并重启」。暂停盯盘后点击，程序校验下载包，备份本机工作区，退出后替换 exe 并重启。
+客户端启动时及运行期间每 15 分钟读取一次仓库中的公开版本文件 `update.json`。发现版本更高且有 SHA-256 的正式 Windows 包时，右上角显示「更新并重启」。暂停盯盘后点击，程序校验下载包，备份本机工作区，退出后替换 exe 并重启。
 
-发布版本用 `vX.Y.Z` 标签，Windows 附件命名为 `LiveAdStudio-vX.Y.Z-Win11-x64.zip`，内含一份 `LiveAdStudio.exe`。客户端读取本仓库匿名可访问的 Releases。首次安装支持更新的版本需手动替换 exe。
+发布版本用 `vX.Y.Z` 标签，Windows 附件命名为 `LiveAdStudio-vX.Y.Z-Win11-x64.zip`，内含一份 `LiveAdStudio.exe`。正式附件上传且校验完成后，再更新 `main` 根目录的 `update.json`。字段为 `version`（三段数字，不含 v）、`size`（ZIP 字节数）和 `sha256`（64 位十六进制）。客户端按固定仓库和版本生成下载地址。2.2.1 及更早版本可手动替换一次 exe，迁移到此更新源。
 
 ## 参与开发
 

@@ -17,19 +17,19 @@ static class UpdateChecks
         using (var zip = new ZipArchive(package, ZipArchiveMode.Create, leaveOpen: true))
             zip.CreateEntryFromFile(sample, "release/LiveAdStudio.exe");
         var digest = Convert.ToHexString(SHA256.HashData(package.ToArray()));
-        JsonElement Release(string download = url, bool prerelease = false, string? hash = null)
+        JsonElement Manifest(string published = "3.0.0", string? hash = null, long? size = null)
             => JsonSerializer.SerializeToElement(new
             {
-                draft = false, prerelease, tag_name = "v3.0.0",
-                assets = new[] { new { name, state = "uploaded", browser_download_url = download, size = package.Length, digest = "sha256:" + (hash ?? digest) } }
+                version = published, size = size ?? package.Length, sha256 = hash ?? digest,
+                download = "https://example.invalid/update.zip"
             });
         var installed = new Version(2, 2, 0, 0);
-        var offer = AppUpdate.ReadOffer(Release(), installed);
-        if (offer?.Version != version ||
-            AppUpdate.ReadOffer(Release(), new Version(3, 0, 0, 0)) != null ||
-            AppUpdate.ReadOffer(Release(prerelease: true), installed) != null ||
-            AppUpdate.ReadOffer(Release(download: "https://example.invalid/update.zip"), installed) != null ||
-            AppUpdate.ReadOffer(Release(hash: "invalid"), installed) != null)
+        var offer = AppUpdate.ReadOffer(Manifest(), installed);
+        if (offer?.Version != version || offer.Download.AbsoluteUri != url ||
+            AppUpdate.ReadOffer(Manifest(), new Version(3, 0, 0, 0)) != null ||
+            AppUpdate.ReadOffer(Manifest(published: "3.0.0-beta"), installed) != null ||
+            AppUpdate.ReadOffer(Manifest(size: 0), installed) != null ||
+            AppUpdate.ReadOffer(Manifest(hash: "invalid"), installed) != null)
             throw new InvalidDataException("Update offer verification failed.");
 
         var staged = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N") + ".update");
