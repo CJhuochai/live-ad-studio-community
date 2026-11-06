@@ -187,7 +187,20 @@ sealed class StudioForm : Form
             case "snapshot":
                 var q=p.GetProperty("snapshot").Deserialize<Snapshot>(json)??throw new InvalidDataException("快照为空。");Rules.ValidateSnapshot(q,scope:R.Finance);
                 if(q.Source=="截图核对"&&(!p.TryGetProperty("confirmed",out var confirmed)||!confirmed.GetBoolean()))throw new InvalidDataException("请先核对截图数字。");
-                if(R.Finance.Snapshots.Any(s=>s.At==q.At))throw new InvalidDataException("该时间已有快照，请调整时间。");R.Finance.Snapshots.Add(q);Save();Post(new{type="dialogSaved"});Toast("累计快照已保存。");break;
+                q.Id=Guid.NewGuid().ToString("N");
+                q.Scope=p.TryGetProperty("scopeConfirmed",out var scopeOk)&&scopeOk.GetBoolean()?ConfirmedScope():null;
+                if(R.Finance.Snapshots.Any(s=>s.At==q.At))throw new InvalidDataException("该时间已有快照，请调整时间。");
+                R.Finance.Snapshots.Add(q);RefreshReviews();Save();Post(new{type="dialogSaved"});Toast("累计快照已保存。");break;
+            case "confirmSnapshotScope":
+                var scope=ConfirmedScope();
+                var existing=R.Finance.Snapshots.SingleOrDefault(s=>s.At==p.GetProperty("at").GetDateTime())
+                    ??throw new InvalidDataException("快照已不存在。");
+                Rules.ValidateSnapshot(existing,scope:R.Finance);
+                if(existing.Scope is not null&&existing.Scope!=scope)throw new InvalidDataException("该快照已绑定其他范围，请录入正确的快照。");
+                if(MessageBox.Show(this,$"请对照原图确认：{ScopeLabel(scope)}。\n记录时间：{existing.At:yyyy-MM-dd HH:mm}。\n确认原截图与上述口径一致？","核对快照口径",MessageBoxButtons.YesNo)!=DialogResult.Yes)break;
+                existing.Scope=scope;RefreshReviews();Save();Toast("已确认快照口径。");break;
+            case "confirmReconciliation":
+                ConfirmReconciliation();break;
             case "deleteSnapshot":
                 var at=p.GetProperty("at").GetDateTime();if(MessageBox.Show("删除选中的快照？","删除确认",MessageBoxButtons.YesNo)!=DialogResult.Yes)return;R.Finance.Snapshots.RemoveAll(s=>s.At==at);Save();break;
             case "change":var note=Text("text").Trim();if(note.Length==0||note.Length>2000)throw new InvalidDataException("请填写1—2000字变更内容。");R.Finance.Changes.Add(new(){Text=note});Event("记录调整："+note);Save();Post(new{type="dialogSaved"});break;
@@ -336,7 +349,7 @@ sealed class StudioForm : Form
         var warning=regressions>0?$"\n注意：{regressions}笔退款或核销状态将回退，可能导入了旧文件，请核对。":"";
         if(MessageBox.Show($"账号：{account}\n当前统计范围直播支付{m.Count}笔，实收{m.Gross:N2}，退款{m.Refund:N2}，保留{m.Retained:N2}。\n按订单号更新，其他日期/渠道不纳入本场。{warning}\n确认导入？","订单预览",MessageBoxButtons.YesNo)!=DialogResult.Yes)return;
         if(R.Finance.Account!=account)R.Facts=new();
-        R.Finance.Account=account;R.Finance.Merge(incoming);R.OrdersImportedAt=DateTime.Now;Event($"导入订单{incoming.Count}笔，退款与核销以本次文件更新。");Save();Toast("订单已导入，查看数据复盘。");
+        R.Finance.Account=account;R.Finance.Merge(incoming);R.OrdersImportedAt=DateTime.Now;R.LatestOrderImportScope=ReviewEvidence.Scope(R);Event($"导入订单{incoming.Count}笔，退款与核销以本次文件更新。");Save();Toast("订单已导入，查看数据复盘。");
     }
     void ImportMaterials()
     {
@@ -345,14 +358,39 @@ sealed class StudioForm : Form
         var batch=MaterialImport.Read(d.FileName);batch.PlanId=R.Business.PlanId;batch.Start=R.Finance.Start??R.Finance.Day.Date;batch.End=R.Finance.End??R.Finance.Day.Date.AddDays(1);
         Decision.Validate(new(){Finance=R.Finance,Business=R.Business,Facts=R.Facts,MaterialBatches=[batch]});
         var missing=batch.Rows.Count(r=>r.Title.Length==0||!r.Created.HasValue);
-        if(MessageBox.Show($"{batch.Kind} {batch.Rows.Count}条，消耗{batch.Rows.Sum(r=>r.Spend):N2}元，GMV{batch.Rows.Sum(r=>r.Gmv):N2}元。\n{missing}条标题或创建时间缺失，将保留为未知。\n\n文件没有计划ID和统计日期：请核对它来自计划{batch.PlanId}，统计范围{batch.Start:yyyy-MM-dd HH:mm}至{batch.End:yyyy-MM-dd HH:mm}（不含结束）。\n范围一致才点“是”。此报表不能证明审核通过或曝光为0。","核对素材报表范围",MessageBoxButtons.YesNo)!=DialogResult.Yes)return;
-        batch.ScopeConfirmed=true;Decision.AddReport(R,batch);Event($"导入{batch.Kind}素材报表{batch.Rows.Count}条；统计范围由用户核对。");Save();Toast("已导入素材体检；相同范围仅取该类型最新批次，不重复累计。");
+        var scope=ReviewEvidence.Scope(R);
+        if(MessageBox.Show($"{batch.Kind} {batch.Rows.Count}条，消耗{batch.Rows.Sum(r=>r.Spend):N2}元，GMV{batch.Rows.Sum(r=>r.Gmv):N2}元。\n{missing}条标题或创建时间缺失，将保留为未知。\n\n请核对报表对应 {ScopeLabel(scope)}。\n范围一致才点“是”。此报表不能证明审核通过或曝光为0。","核对素材报表范围",MessageBoxButtons.YesNo)!=DialogResult.Yes)return;
+        batch.ScopeConfirmed=true;batch.EvidenceScope=scope;
+        Decision.AddReport(R,batch);Event($"导入{batch.Kind}素材报表{batch.Rows.Count}条；统计范围由用户核对。");Save();Toast("素材已导入。核对同一截止点后可计算差额。");
     }
     void ImportReport()
     {
         using var d=new OpenFileDialog{Filter="增量价值报表|*.xlsx"};if(d.ShowDialog(this)!=DialogResult.OK)return;var r=ExcelImport.Report(d.FileName);
         if(r.Day.Date!=R.Finance.Day.Date)throw new InvalidDataException("增量报表日期与场次日期不符。");
         if(MessageBox.Show($"账号/抖音号：{r.Account}\n总成交{r.Gmv:N2}，自然{r.Natural:N2}，增量{r.Increment:N2}。\n确认与当前场次同账号？","核对报表",MessageBoxButtons.YesNo)!=DialogResult.Yes)return;R.Finance.Report=r;Save();
+    }
+    static string ScopeLabel(EvidenceScope scope)=>$"账号 {scope.Account}，计划 {scope.PlanId}，统计范围 {scope.Start:yyyy-MM-dd HH:mm} 至 {scope.End:yyyy-MM-dd HH:mm}";
+    EvidenceScope ConfirmedScope()
+    {
+        var scope=ReviewEvidence.Scope(R);
+        if(!ReviewEvidence.Matches(R,scope))throw new InvalidDataException("请先在场次设置填写账号，并在经营目标填写计划ID。");
+        return scope;
+    }
+    void RefreshReviews(){foreach(var action in R.FollowUps)ReviewEvidence.Refresh(R,action);}
+    void ConfirmReconciliation()
+    {
+        var scope=ConfirmedScope();
+        var snapshot=R.Finance.UsableSnapshots.OrderBy(s=>s.At).LastOrDefault()
+            ??throw new InvalidDataException("请先保存累计快照。");
+        if(!ReviewEvidence.Matches(R,snapshot.Scope))throw new InvalidDataException("请先核对最近快照的口径。");
+        var batches=Decision.CurrentReports(R);
+        if(batches.Count==0)throw new InvalidDataException("请先导入对应范围的素材报表。");
+        if(batches.Any(b=>b.EvidenceScope is not null&&b.EvidenceScope!=scope))
+            throw new InvalidDataException("报表已绑定其他账号或范围，请重新导入正确文件。");
+        var names=string.Join("、",batches.Select(b=>b.Kind+" "+b.FileName));
+        if(MessageBox.Show(this,$"最近快照：{snapshot.At:yyyy-MM-dd HH:mm:ss}。\n{ScopeLabel(scope)}。\n素材报表：{names}。\n请核对后台原始数据，确认这些报表和快照的实际数据截止点一致后再继续。","确认同一截止点",MessageBoxButtons.YesNo)!=DialogResult.Yes)return;
+        foreach(var batch in batches){batch.EvidenceScope=scope;batch.ComparedSnapshotAt=snapshot.At;batch.ComparedSnapshotId=snapshot.Id;}
+        Event("已核对素材报表与最近快照的统计范围和截止点。");Save();Toast("对账结果已更新。");
     }
     void Backup()
     {

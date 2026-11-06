@@ -25,8 +25,8 @@ function openFacts(){const f=S.facts;let body='<div class="formnote">仅记录�
 function materialsPage(){const m=S.materials;return '<div class="sectiontitle">看清预算花在了哪些内容上</div><div class="toolbar"><button class="btn primary" onclick="act(\'materials\')">导入视频 / 图文报表</button><button class="btn" onclick="openBusiness()">核对计划ID</button></div><div class="minirow"><div><span>当前范围素材</span><b>'+m.totalCount+' 条</b></div><div><span>素材报表消耗</span><b>¥'+num(m.spend)+'</b></div><div><span>有消耗 / 待核实相关性</span><b>'+m.paidCount+' / '+m.unreviewed+'</b></div></div><div class="hint">'+icon('image')+'效果导出不含审核/曝光字段。零消耗不代表素材无效；相关性需看实际内容并由你确认。</div><form class="searchrow" onsubmit="event.preventDefault();act(\'materialQuery\',{query:document.getElementById(\'materialSearch\').value.trim()})"><input id="materialSearch" aria-label="搜索素材" maxlength="100" placeholder="搜索标题、素材ID或来源" value="'+esc(m.query)+'"><button class="btn">搜索</button></form><div class="card"><div class="tablewrap"><table><thead><tr><th>素材 / 来源</th><th>消耗 / 占比</th><th>人工记录</th><th></th></tr></thead><tbody>'+(m.rows.map((r,i)=>'<tr><td class="materialtitle">'+esc(r.title||'标题缺失')+'<small>'+esc(r.kind+' · '+r.source)+'<br>ID '+esc(r.id)+' · '+(r.created?dt(r.created):'创建时间未知')+'</small></td><td>¥'+num(r.spend)+'<br><span class="small">'+(r.share===null?'—':num(r.share*100,1)+'%')+'</span></td><td><span class="tag '+(r.relevance==='不相关'&&r.resolution==='未处理'?'warn':'')+'">'+esc(r.relevance)+'</span><small>'+esc(r.resolution)+'</small></td><td><button class="textbtn" onclick="openMaterialReview('+i+')">核对</button></td></tr>').join('')||'<tr><td colspan="4" class="empty">先填计划ID，再导入当前范围的素材报表</td></tr>')+'</tbody></table></div><div class="body small">匹配 '+m.matchedCount+' 条，当前最多显示300条；可搜索定位。占比仅为当前范围历史消耗分布，不代表素材效果。</div></div><details class="card"><summary class="fold">查看报表范围与导入记录</summary><div class="body">'+(m.reports.map(r=>'<div class="event"><span class="edot"></span><div><b>'+esc(r.kind)+' · '+r.count+'条</b> <span class="tag">'+(r.active?'当前使用':'较早 / 范围未匹配')+'</span><br><span class="small">'+esc(r.fileName)+'<br>计划 '+esc(r.planId)+' · '+dt(r.start)+' 至 '+dt(r.end)+'<br>日期未知 '+r.invalidDates+' 条，标题缺失 '+r.blankTitles+' 条；范围'+(r.scopeConfirmed?'由用户确认':'尚未确认')+'</span></div></div>').join('')||'<span class="small">尚未导入</span>')+'</div></details>'}
 function openMaterialReview(i){const r=S.materials.rows[i];let body='<p>'+esc(r.title||'标题缺失')+'</p><div class="formnote">'+esc(r.kind+' · '+r.source)+' · ID '+esc(r.id)+'<br>实际视频需在本地推查看；工具不因标题自动判定相关性。</div><div class="formgrid">'+selectField('看过实际内容后的判断','relevance',r.relevance,['未核实','相关','不相关'])+selectField('你在后台实际做了什么','resolution',r.resolution,['未处理','已排除','已停用','保留观察'])+textArea('核查依据 / 操作备注','materialNotes',r.notes)+'</div><div class="formnote">这里只记录你的确认，不会删除、暂停或修改后台素材。</div>';showModal('人工核对素材',body,()=>submitDialog('materialReview',{kind:r.kind,id:r.id,relevance:val('relevance'),resolution:val('resolution'),notes:val('materialNotes')}))}
 const previousHistoryPage=historyPage;
-historyPage=function(){return '<div class="sectiontitle">让每次调整都有复查结果</div><div class="toolbar"><button class="btn primary" onclick="openFollowUp()">＋ 新建行动复查</button></div>'+((S.followUps||[]).map((v,i)=>'<div class="card"><div class="cardtop"><h2>'+esc(v.item.title)+'</h2><span class="tag">'+esc(v.result.status)+'</span></div><div class="body"><p class="small">'+esc(v.item.reason||'尚未填写依据')+'</p><div class="comparison"><div><span>执行前 · '+esc(v.item.metric)+'</span><b>'+num(v.result.beforeValue)+'</b>'+(v.result.before?'<small>'+dt(v.result.before.start)+' → '+dt(v.result.before.end)+'</small>':'')+'</div><span>→</span><div><span>执行后 · '+esc(v.item.metric)+'</span><b>'+num(v.result.afterValue)+'</b>'+(v.result.after?'<small>'+dt(v.result.after.start)+' → '+dt(v.result.after.end)+'</small>':'')+'</div></div><p class="small">'+esc(v.result.note)+'</p>'+(v.item.assessment?'<p>人工结论：'+esc(v.item.assessment)+'</p>':'')+'<button class="textbtn" onclick="openFollowUp('+i+')">记录执行 / 复查 →</button></div></div>').join('')||'<div class="card"><div class="empty">先记录一个动作，再补充执行前后的已确认快照。<br>前后变化不自动等于该动作造成的效果。</div></div>')+previousHistoryPage()};
-function openFollowUp(index=null,prefill={}){const old=index===null?null:S.followUps[index]?.item;if(old?.reviewedAt){showModal('已人工复查 · 只读','<div class="formnote">复查记录已锁定；后续调整请新建行动。</div>'+['title','reason','expected','stopCondition','confounders','assessment'].map((k,i)=>'<p><b>'+['行动','依据','预期','退出条件','同期变化','人工结论'][i]+'</b><br>'+esc(old[k]||'未填写')+'</p>').join('')+'<div class="small">执行：'+dt(old.executedAt)+' · 复查：'+dt(old.reviewedAt)+'</div>',null);return}const a=old||{id:crypto.randomUUID().replaceAll('-',''),title:'',reason:'',expected:'',stopCondition:'',confounders:'',executedAt:null,reviewMinutes:30,metric:'支付ROI',assessment:'',archived:false,...prefill};const body='<div class="formnote">先记录建议；实际执行后再填执行时间。比较需要前后各两条已确认快照，并覆盖观察窗。不会自动调整广告。</div><div class="formgrid">'+field('行动内容','actionTitle',a.title,'text',true)+textArea('依据：哪些事实支持这个动作','reason',a.reason,1500)+field('实际执行时间（未执行留空）','executedAt',a.executedAt?.slice(0,19),'datetime-local')+field('执行后观察分钟（本地约定）','reviewMinutes',a.reviewMinutes,'number')+selectField('主要复查指标','actionMetric',a.metric,['支付ROI','人数成本','消耗速度'])+textArea('希望看到什么变化','expected',a.expected,1000)+textArea('何时停止追加 / 退出条件','stopCondition',a.stopCondition,1000)+textArea('同期还有哪些变化：话术、商品、自然流量等','confounders',a.confounders,1500)+textArea('人工复查结论；数据不足也应如实注明','assessment',a.assessment,2000)+'</div>'+checkField('markReviewed','已核对完整区间，记录为人工复查完成',false)+checkField('archived','归档这项行动（须填写原因，不代表动作有效）',a.archived);showModal(old?'执行与复查':'建立一个可验证的行动',body,()=>attempt(()=>{const item={...a,title:val('actionTitle'),reason:val('reason'),executedAt:val('executedAt')||null,reviewMinutes:nullable('reviewMinutes'),metric:val('actionMetric'),expected:val('expected'),stopCondition:val('stopCondition'),confounders:val('confounders'),assessment:val('assessment'),archived:checked('archived')};submitDialog('followUp',{item,markReviewed:checked('markReviewed')})}))}
+historyPage=function(){return '<div class="sectiontitle">让每次调整都有复查结果</div><div class="toolbar"><button class="btn primary" onclick="openTargetChange()">＋ 记录调价</button><button class="btn" onclick="openFollowUp()">新建行动复查</button></div>'+((S.followUps||[]).map((v,i)=>'<div class="card"><div class="cardtop"><h2>'+esc(v.item.title)+'</h2><span class="tag">'+esc(v.result.status)+'</span></div><div class="body"><p class="small">'+esc(v.item.reason||'尚未填写依据')+'</p><div class="comparison"><div><span>执行前 · '+esc(v.item.metric)+'</span><b>'+num(v.result.beforeValue)+'</b>'+(v.result.before?'<small>'+dt(v.result.before.start)+' → '+dt(v.result.before.end)+'</small>':'')+'</div><span>→</span><div><span>执行后 · '+esc(v.item.metric)+'</span><b>'+num(v.result.afterValue)+'</b>'+(v.result.after?'<small>'+dt(v.result.after.start)+' → '+dt(v.result.after.end)+'</small>':'')+'</div></div><p class="small">'+esc(v.result.note)+'</p>'+reviewDetails(v)+(v.item.assessment?'<p>人工结论：'+esc(v.item.assessment)+'</p>':'')+'<button class="textbtn" onclick="openFollowUp('+i+')">记录执行 / 复查 →</button></div></div>').join('')||'<div class="card"><div class="empty">先记录一个动作，再补充执行前后的已确认快照。<br>前后变化不自动等于该动作造成的效果。</div></div>')+previousHistoryPage()};
+function openFollowUp(index=null,prefill={}){const old=index===null?null:S.followUps[index]?.item;if(old?.reviewedAt){showModal('已人工复查 · 只读','<div class="formnote">复查记录已锁定；后续调整请新建行动。</div>'+['title','reason','expected','stopCondition','confounders','assessment'].map((k,i)=>'<p><b>'+['行动','依据','预期','退出条件','同期变化','人工结论'][i]+'</b><br>'+esc(old[k]||'未填写')+'</p>').join('')+'<div class="small">执行：'+dt(old.executedAt)+' · 复查：'+dt(old.reviewedAt)+'</div>',null);return}const a=old||{id:crypto.randomUUID().replaceAll('-',''),title:'',reason:'',expected:'',stopCondition:'',confounders:'',executedAt:null,reviewMinutes:30,metric:'支付ROI',assessment:'',archived:false,fixedWindow:true,...prefill};const body='<div class="formnote">先记录建议；实际执行后再填执行时间。新版用三笔同口径快照对比等长窗口。不会自动调整广告。</div><div class="formgrid">'+field('行动内容','actionTitle',a.title,'text',true)+textArea('依据：哪些事实支持这个动作','reason',a.reason,1500)+field('实际执行时间（未执行留空）','executedAt',a.executedAt?.slice(0,19),'datetime-local')+field('执行后观察分钟（本地约定）','reviewMinutes',a.reviewMinutes,'number')+selectField('主要复查指标','actionMetric',a.metric,['支付ROI','人数成本','消耗速度'])+textArea('希望看到什么变化','expected',a.expected,1000)+textArea('何时停止追加 / 退出条件','stopCondition',a.stopCondition,1000)+textArea('同期还有哪些变化：话术、商品、自然流量等','confounders',a.confounders,1500)+textArea('人工复查结论；数据不足也应如实注明','assessment',a.assessment,2000)+'</div>'+checkField('markReviewed','已核对完整区间，记录为人工复查完成',false)+checkField('archived','归档这项行动（须填写原因，不代表动作有效）',a.archived);showModal(old?'执行与复查':'建立一个可验证的行动',body,()=>attempt(()=>{const item={...a,title:val('actionTitle'),reason:val('reason'),executedAt:val('executedAt')||null,reviewMinutes:nullable('reviewMinutes'),metric:val('actionMetric'),expected:val('expected'),stopCondition:val('stopCondition'),confounders:val('confounders'),assessment:val('assessment'),archived:checked('archived')};submitDialog('followUp',{item,markReviewed:checked('markReviewed')})}))}
 function openScreenshotGuide() {
   showModal('截图填表', `<div id="screenshotGuide">
     <div class="formnote">截图由本机识别。核对后才写入当前场次。</div>
@@ -64,4 +64,65 @@ function openPlanScreenshot(message) {
         budget: nullable('screenBudget'), target: nullable('screenTarget')}
     });
   }));
+}
+
+function openTargetChange(){
+    const body='<div class="formnote">记录已在后台执行的调整。先留同口径基线，到点再保存一笔。</div><div class="formgrid">'
+        +field('改前目标','oldTarget',S.finance.target,'number')
+        +field('改后目标','newTarget','','number')
+        +field('实际执行时间','targetAt',localTime(),'datetime-local')
+        +field('观察分钟','targetMinutes',30,'number')+'</div>';
+    showModal('记录调价 · '+S.finance.goal,body,()=>attempt(()=>{
+        const previousTarget=nullable('oldTarget'),newTarget=nullable('newTarget'),executedAt=val('targetAt');
+        if(!(previousTarget>0)||!(newTarget>0)||previousTarget===newTarget||!executedAt)
+            throw Error('请填写不同的正数目标及实际执行时间');
+        const item={id:crypto.randomUUID().replaceAll('-',''),title:'目标 '+previousTarget+' → '+newTarget,
+            fixedWindow:true,previousTarget,newTarget,targetGoal:S.finance.goal,executedAt,
+            reviewMinutes:nullable('targetMinutes'),metric:'消耗速度'};
+        submitDialog('followUp',{item,markReviewed:false});
+    }));
+}
+
+function reviewDetails(v){
+    const {before,after,recommendation}=v.result;
+    if(!before||!after)return '';
+    const metrics=[['消耗（元/分钟）','spendPerMinute'],['新增进房人数','visits'],['新增商品点击','clicks'],['支付 ROI','roi'],['成单人数成本','cpa']];
+    return '<details class="subform"><summary>查看前后窗口数据</summary><div class="tablewrap"><table>'
+        +'<thead><tr><th>指标</th><th>调整前</th><th>调整后</th></tr></thead><tbody>'
+        +metrics.map(([label,k])=>'<tr><td>'+label+'</td><td>'+num(before[k])+'</td><td>'+num(after[k])+'</td></tr>').join('')
+        +'</tbody></table></div></details>'+(recommendation?'<p class="hint">'+esc(recommendation)+'</p>':'');
+}
+
+function reconciliationCard(){
+    const d=S.reconciliation;
+    const scope=S.scope;
+    const bind=(S.snapshots||[]).filter(q=>!q.scope&&q.at===d.at)[0];
+    const amount=v=>v==null?'—':'¥'+num(v);
+    const values=[['计划快照',d.planSpend],['已导入素材',d.materialSpend],['可比差额',d.difference]];
+    return '<div class="card"><div class="cardtop"><h2>消耗对账</h2><span class="tag">'+esc(d.status)+'</span></div><div class="body">'
+        +'<div class="minirow">'+values.map(([label,value])=>'<div><span>'+label+'</span><b>'+amount(value)+'</b></div>').join('')+'</div>'
+        +'<p class="small">'+esc(d.note)+'</p>'
+        +(scope.account&&scope.planId&&d.at?'<div class="actionrow">'
+            +(bind?'<button class="btn" onclick="act(\'confirmSnapshotScope\',{at:\''+esc(d.at)+'\'})">核对快照口径</button>':'')
+            +(d.materialSpend!=null&&d.difference==null?'<button class="btn" onclick="act(\'confirmReconciliation\')">核对报表截止点</button>':'')+'</div>':'')
+        +'</div></div>';
+}
+
+const previousDataPage=dataPage;
+dataPage=function(){
+    const increment=S.increment;
+    return previousDataPage()+reconciliationCard()+(increment
+        ?'<div class="card"><div class="cardtop"><h2>账号日增量报表</h2><span class="tag">独立口径</span></div><div class="body">'
+        +'<p class="small">'+esc(increment.account)+' · '+dt(increment.day)+'</p><div class="minirow">'
+        +[['总成交','gmv'],['自然成交','natural'],['增量成交','increment']].map(([label,k])=>'<div><span>'+label+'</span><b>¥'+num(increment[k])+'</b></div>').join('')
+        +'</div></div></div>':'');
+};
+
+function snapshotScopeAction(q){
+    if(q.scope){
+        const matches=['roomId','account','planId','start','end'].every(k=>q.scope[k]===S.scope[k]);
+        return '<span class="small">'+(matches?'口径已确认':'其他口径')+'</span> ';
+    }
+    if(!S.scope.account||!S.scope.planId)return '';
+    return '<button class="textbtn" onclick="act(\'confirmSnapshotScope\',{at:\''+esc(q.at)+'\'})">核对口径</button> ';
 }

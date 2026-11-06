@@ -41,6 +41,9 @@ sealed class DeliveryFacts
 }
 sealed class MaterialBatch
 {
+    public EvidenceScope? EvidenceScope {get;set;}
+    public DateTime? ComparedSnapshotAt {get;set;}
+    public string? ComparedSnapshotId {get;set;}
     public string Id {get;set;}=Guid.NewGuid().ToString("N");
     public string FileName {get;set;}="";
     public string Kind {get;set;}="视频";
@@ -73,6 +76,13 @@ sealed class MaterialReview
 }
 sealed class FollowUp
 {
+    public bool FixedWindow {get;set;}
+    public decimal? PreviousTarget {get;set;}
+    public decimal? NewTarget {get;set;}
+    public string? TargetGoal {get;set;}
+    public Snapshot? Baseline {get;set;}
+    public Snapshot? ReviewStart {get;set;}
+    public FollowUpResult? LockedResult {get;set;}
     public string Id {get;set;}=Guid.NewGuid().ToString("N");
     public string Title {get;set;}="";
     public string Reason {get;set;}="";
@@ -89,8 +99,8 @@ sealed class FollowUp
 }
 record DecisionCard(string Id,string Level,string Title,string Evidence,string Action,string Tradeoff,string Review);
 record EconomyView(decimal? PaymentCostCeiling,decimal? ReferenceRoi,decimal? MixRoi,string Note,object[] Scenarios);
-record IntervalResult(DateTime Start,DateTime End,decimal Spend,decimal Gmv,int Buyers,decimal? Roi,decimal? Cpa,decimal SpendPerMinute);
-record FollowUpResult(string Status,string Note,IntervalResult? Before=null,IntervalResult? After=null,decimal? BeforeValue=null,decimal? AfterValue=null);
+record IntervalResult(DateTime Start,DateTime End,decimal Spend,decimal Gmv,int Buyers,decimal? Roi,decimal? Cpa,decimal SpendPerMinute,int? Visits=null,int? Clicks=null);
+record FollowUpResult(string Status,string Note,IntervalResult? Before=null,IntervalResult? After=null,decimal? BeforeValue=null,decimal? AfterValue=null,string? Recommendation=null);
 
 static class Decision
 {
@@ -135,6 +145,10 @@ static class Decision
         Require(a!=null&&Guid.TryParseExact(a.Id,"N",out _),"行动标识无效。");Require(!string.IsNullOrWhiteSpace(a!.Title)&&a.Title.Length<=300,"行动内容为1—300字。");
         Text(a.Reason,1500,"行动依据");Text(a.Expected,1000,"预期变化");Text(a.StopCondition,1000,"退出条件");Text(a.Confounders,1500,"同期变化");Text(a.Assessment,2000,"复查结论");
         Require(a.ReviewMinutes is >=5 and <=1440,"复查间隔为5—1440分钟。");Require(Metrics.Contains(a.Metric),"行动指标无效。");Require(!a.ExecutedAt.HasValue||a.ExecutedAt<=DateTime.Now.AddMinutes(5),"执行时间不能在未来。");
+        Require(a.PreviousTarget is null or >0 && a.NewTarget is null or >0,"调价目标必须大于零。");
+        if(a.PreviousTarget.HasValue||a.NewTarget.HasValue||a.TargetGoal is not null)
+            Require(a.FixedWindow&&a.PreviousTarget is >0&&a.NewTarget is >0&&a.PreviousTarget!=a.NewTarget&&
+                a.TargetGoal is "成交金额" or "成单人数","调价需要同一目标口径、两个不同的正数和固定复查窗口。");
         Require(!a.ReviewedAt.HasValue||a.ExecutedAt.HasValue,"未执行行动不能标记已复查。");
         Require(!a.Archived||!string.IsNullOrWhiteSpace(a.Assessment),"归档行动需要填写原因，归档不代表有效。");
     }
@@ -213,21 +227,26 @@ static class Decision
         if(b.MaxCost==null)Add("goal","待核查","先明确经营要求","还未填写可接受获客成本及口径。","在经营目标中区分支付成交、未退款成交与试验投入。","日预算不是单笔获客成本保证。","填写后查看ROI换算与成本放宽代价。");
         else if(b.SellingMode=="多商品"&&e.MixRoi==null)Add("mix","观察","单款参考ROI不能代表混卖整场",$"本场为多商品；单款参考ROI{Calc.N(e.ReferenceRoi)}，预期成交结构尚不完整。","填写各商品价格、可接受广告费和预期订单，或先保留未知。","预期结构是情景估算，不能从一两笔订单当作稳定比例。","导入实际订单，核对商品与退款结构。");
         if(b.HardCeiling&&s.Goal=="成交金额"&&s.Target.HasValue&&relevantRoi is >0&&s.Target<relevantRoi)Add("ceiling","需处理","后台目标放宽了你的经营成本要求",$"当前ROI目标{s.Target:N2}，按所填假设计算的参考下限{relevantRoi:N2}。","先确认是否接受更高的成交广告成本，再考虑放宽目标。","系统目标本身也不是逐单硬上限；自动出价不保证200元成交。","按同范围支付与未退款结果分别复查。");
+        if(b.HardCeiling&&s.Goal=="成单人数"&&b.SellingMode=="单主推"&&e.PaymentCostCeiling is >0&&s.Target>e.PaymentCostCeiling)
+            Add("people-ceiling","需处理","人数成本目标高于经营参考上限",$"后台目标{s.Target:N2}元，单主推支付口径参考{e.PaymentCostCeiling:N2}元。","先核对人数成本与每单成本的口径，再决定试错边界。","参考值按一位买家一单估算。","复查成交结构和同口径的实际人数成本。");
         var m=LiveAdDesk.Metrics.From(s);
         if(m.Refund>0)Add("refund","观察","支付成交需要继续看退款",$"订单范围内实收{m.Gross:N2}元、退款{m.Refund:N2}元、保留{m.Retained:N2}元。","查看分商品退款、原因和后续核销，避免由一笔高价单决定放量。","保留金额不是已核销收入；全域成交也不是逐单广告归因。","补导最新退款/核销结果并核对快照范围。");
         if(list.Count==0)Add("observe","观察","前置核查已记录，继续验证成交","当前没有命中明确阻断；这不证明必然能起量。","保持单次可追踪的改动，记录各商品成交与退款。","不因花出预算就判定投放有效。","创建行动复查，并等待足够的已确认区间数据。");
         return list.OrderBy(c=>c.Level=="需处理"?0:c.Level=="待核查"?1:c.Level=="待验证"?2:3).ToList();
     }
-    static IntervalResult? Interval(Snapshot a,Snapshot b)
+    internal static IntervalResult? Interval(Snapshot a,Snapshot b)
     {
         if(a.At.Date!=b.At.Date||b.At<=a.At||b.Spend<a.Spend||b.Gmv<a.Gmv||b.Buyers<a.Buyers)return null;
         decimal spend=b.Spend-a.Spend,gmv=b.Gmv-a.Gmv;int buyers=b.Buyers-a.Buyers;
-        return new(a.At,b.At,spend,gmv,buyers,Calc.Ratio(gmv,spend),Calc.Ratio(spend,buyers),spend/(decimal)(b.At-a.At).TotalMinutes);
+        static int? Delta(int? first,int? last)=>first.HasValue&&last>=first?last-first:null;
+        return new(a.At,b.At,spend,gmv,buyers,Calc.Ratio(gmv,spend),Calc.Ratio(spend,buyers),spend/(decimal)(b.At-a.At).TotalMinutes,
+            Delta(a.Visits,b.Visits),Delta(a.Clicks,b.Clicks));
     }
     public static FollowUpResult Evaluate(Room r,FollowUp action)
     {
         if(action.Archived)return new("已归档","用户归档，不代表动作有效。原因："+action.Assessment);
         if(!action.ExecutedAt.HasValue)return new("待执行","记录实际执行时间后，才开始匹配前后区间。");
+        if(action.FixedWindow)return ReviewEvidence.Evaluate(r,action);
         var at=action.ExecutedAt.Value;var all=r.Finance.UsableSnapshots.OrderBy(x=>x.At).ToArray();
         var before=all.Where(x=>x.At<=at).TakeLast(2).ToArray();var after=all.Where(x=>x.At>=at).ToArray();
         if(before.Length<2||after.Length<2)return new("等待快照","需要执行前后各两条已确认累计快照；聊天描述不替代区间数据。");

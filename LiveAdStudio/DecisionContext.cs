@@ -23,6 +23,10 @@ static class DecisionContext
         var groups=s.LiveOrders.Where(o=>o.PaidTime.HasValue).GroupBy(o=>o.Product).OrderByDescending(x=>x.Sum(o=>o.Paid)).ToArray();
         foreach(var p in groups.Take(12))b.AppendLine($"商品{Cut(p.Key,120)}：{p.Count()}笔，实收{p.Sum(o=>o.Paid)}、退款{p.Sum(o=>o.Refund)}、保留{p.Sum(o=>o.Paid-o.Refund)}；退款标签{Cut(string.Join("；",p.Where(o=>o.Refund>0).Select(o=>o.Reason).Distinct()),200)}（标签不确证根因）。");
         if(groups.Length>12)b.AppendLine($"另有{groups.Length-12}个商品未展开，可在商品汇总查看。");
+        var reconciliation=ReviewEvidence.Reconcile(r);
+        b.AppendLine($"【消耗对账】{reconciliation.Status}，快照消耗{Calc.N(reconciliation.PlanSpend)}，已导入素材消耗{Calc.N(reconciliation.MaterialSpend)}，可比差额{Calc.N(reconciliation.Difference)}。{reconciliation.Note}");
+        if(s.Report is {} increment)
+            b.AppendLine($"【账号日增量报表】账号{increment.Account}，日期{increment.Day:yyyy-MM-dd}，总GMV{increment.Gmv}，自然{increment.Natural}，增量{increment.Increment}。独立账号日口径，请勿合并至计划或用于因果判断。");
         foreach(var batch in Decision.CurrentReports(r))
         {
             b.AppendLine($"【{batch.Kind}素材报表】{batch.Start:yyyy-MM-dd HH:mm}至{batch.End:yyyy-MM-dd HH:mm}，计划{batch.PlanId}（范围由用户核对），{batch.Rows.Count}条，消耗{batch.Rows.Sum(x=>x.Spend)}、GMV{batch.Rows.Sum(x=>x.Gmv)}；该类导出没有审核与曝光字段。");
@@ -31,7 +35,9 @@ static class DecisionContext
         b.AppendLine("【未复查行动，优先持续跟踪】");
         foreach(var a in r.FollowUps.Where(x=>!x.ReviewedAt.HasValue&&!x.Archived).OrderBy(x=>x.CreatedAt))
         {
-            var result=Decision.Evaluate(r,a);b.AppendLine($"行动{a.Id}：{Cut(a.Title,300)}；依据{Cut(a.Reason,150)}；执行{a.ExecutedAt:MM-dd HH:mm}；{a.ReviewMinutes}分钟后看{a.Metric}；预期{Cut(a.Expected,150)}；退出{Cut(a.StopCondition,150)}；同期变化{Cut(a.Confounders,150)}；状态{result.Status}，前值{Calc.N(result.BeforeValue)}后值{Calc.N(result.AfterValue)}，{result.Note}");
+            var result=Decision.Evaluate(r,a);b.AppendLine($"行动{a.Id}：{Cut(a.Title,300)}；依据{Cut(a.Reason,150)}；执行{a.ExecutedAt:MM-dd HH:mm}；{a.ReviewMinutes}分钟后看{a.Metric}；预期{Cut(a.Expected,150)}；退出{Cut(a.StopCondition,150)}；同期变化{Cut(a.Confounders,150)}；状态{result.Status}，前值{Calc.N(result.BeforeValue)}后值{Calc.N(result.AfterValue)}，{result.Note} {result.Recommendation}");
+            if(result.Before is {} before&&result.After is {} after)
+                b.AppendLine($"锁定窗口前后：元/分钟{before.SpendPerMinute:N2}→{after.SpendPerMinute:N2}，进房{before.Visits}→{after.Visits}，点击{before.Clicks}→{after.Clicks}。");
         }
         foreach(var a in r.FollowUps.Where(x=>x.ReviewedAt.HasValue||x.Archived).OrderByDescending(x=>x.ReviewedAt??x.CreatedAt).Take(3))b.AppendLine($"复查/归档行动{Cut(a.Title,100)}：用户结论{Cut(a.Assessment,250)}；此结论不自动外推至下一场。");
         b.AppendLine("【最近调整，最新优先】");foreach(var c in s.Changes.OrderByDescending(x=>x.At).Take(10))b.AppendLine($"{c.At:MM-dd HH:mm} {Cut(c.Text,300)}");

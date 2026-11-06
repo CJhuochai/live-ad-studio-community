@@ -10,9 +10,10 @@ static class StateView
         return new{
             type="state",version=AppUpdate.CurrentVersion.ToString(3),busy,monitoring,model=w.Model,models=(models??[]).Select(a=>new{slug=a.Slug,name=a.Name}),connected,email,
             rooms=w.Rooms.Select(room=>new{id=room.Finance.Id,name=room.Finance.Name,date=room.Finance.Day.ToString("yyyy-MM-dd")}),selected=w.Selected,
+            scope=ReviewEvidence.Scope(r),reconciliation=ReviewEvidence.Reconcile(r),increment=s.Report,
             finance=new{s.Id,s.Name,s.Account,s.Day,s.Start,s.End,s.Goal,s.Product,s.Price,s.FeeRate,s.DirectCost,s.Retention,s.DesiredProfit,s.Budget,s.Target,s.LossLimit,s.Notes,s.SampleMin},
             config=new{r.CaptureSeconds,r.AnalysisMinutes,r.RequestLimit},snapshots=s.Snapshots.OrderBy(q=>q.At).ToList(),chartSnapshots=s.UsableSnapshots.OrderBy(q=>q.At).ToList(),
-            metrics=new{spend=x?.Spend,gmv=x?.Gmv,roi=x==null?null:Calc.Ratio(x.Gmv,x.Spend),retained=s.Orders.Count>0?(decimal?)m.Retained:x?.Refund.HasValue==true?x.Gmv-x.Refund:null,refund=s.Orders.Count>0?(decimal?)m.Refund:x?.Refund,orders=m.Count,buyers=m.Buyers,redeemed=m.Redeemed,latestAt=x?.At,r.OrdersImportedAt},
+            metrics=new{spend=x?.Spend,gmv=x?.Gmv,roi=x==null?null:Calc.Ratio(x.Gmv,x.Spend),retained=m.Count>0?(decimal?)m.Retained:x?.Refund.HasValue==true?x.Gmv-x.Refund:null,refund=m.Count>0?(decimal?)m.Refund:x?.Refund,orders=m.Count,buyers=m.Buyers,redeemed=m.Redeemed,latestAt=x?.At,r.OrdersImportedAt},
             products=s.LiveOrders.Where(o=>o.PaidTime.HasValue&&!o.Status.Contains("未支付")).GroupBy(o=>o.Product).Select(g=>new{name=g.Key,count=g.Count(),gross=g.Sum(o=>o.Paid),refund=g.Sum(o=>o.Refund),kept=g.Sum(o=>o.Paid-o.Refund),reasons=string.Join("；",g.Select(o=>o.Reason).Where(t=>t.Length>0).Distinct())}),
             advice=Calc.Advice(s),changes=s.Changes.OrderByDescending(c=>c.At).Take(30),events=r.Events.TakeLast(30).Reverse(),
             messages=r.Messages.TakeLast(40).Select(c=>new{c.Id,c.Role,c.Text,c.At,images=c.Images.Select(i=>new{id=i,thumb=ImageStore.Thumb(i)})}),

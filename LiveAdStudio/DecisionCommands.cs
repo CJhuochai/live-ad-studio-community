@@ -28,6 +28,13 @@ static class DecisionCommands
                 var next=p.GetProperty("item").Deserialize<FollowUp>(Json)??throw new InvalidDataException("行动为空。");
                 var old=r.FollowUps.FirstOrDefault(x=>x.Id==next.Id);
                 next.CreatedAt=old?.CreatedAt??DateTime.Now;next.ReviewedAt=old?.ReviewedAt;
+                next.FixedWindow=old?.FixedWindow??next.FixedWindow;
+                next.Baseline=old?.Baseline;next.ReviewStart=old?.ReviewStart;next.LockedResult=old?.LockedResult;
+                if(old?.Baseline!=null&&(next.ExecutedAt!=old.ExecutedAt||next.ReviewMinutes!=old.ReviewMinutes||
+                    next.Metric!=old.Metric||next.PreviousTarget!=old.PreviousTarget||next.NewTarget!=old.NewTarget||next.TargetGoal!=old.TargetGoal))
+                    throw new InvalidDataException("调价基线已保存，后续调整请新建记录。");
+                Decision.ValidateAction(next);
+                ReviewEvidence.Refresh(r,next);
                 if(p.TryGetProperty("markReviewed",out var mark)&&mark.GetBoolean())
                 {
                     if(Decision.Evaluate(r,next).Status!="可复查"||string.IsNullOrWhiteSpace(next.Assessment))throw new InvalidDataException("需有完整前后区间并填写人工结论，才能标记已复查；数据不足可填写原因后归档。");

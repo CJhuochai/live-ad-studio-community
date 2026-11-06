@@ -40,8 +40,12 @@ public class Session
         ? (Price*(1-FeeRate/100)-DirectCost)*Retention/100-DesiredProfit : null;
     public override string ToString()=>$"{Day:MM-dd}  {Name}";
 }
+public sealed record EvidenceScope(string RoomId,string Account,string PlanId,DateTime Start,DateTime End);
+
 public class Snapshot
 {
+    public string Id {get;set;}=Guid.NewGuid().ToString("N");
+    public EvidenceScope? Scope {get;set;}
     public DateTime At {get;set;}=DateTime.Now;
     public decimal Spend {get;set;}
     public decimal Gmv {get;set;}

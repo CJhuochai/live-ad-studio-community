@@ -56,6 +56,7 @@ sealed class Room
     public List<MaterialReview> MaterialReviews {get;set;}=[];
     public List<FollowUp> FollowUps {get;set;}=[];
     public DateTime? OrdersImportedAt {get;set;}
+    public EvidenceScope? LatestOrderImportScope {get;set;}
     public List<ChatItem> Messages {get;set;}=[];
     public List<CallLog> Calls {get;set;}=[];
     public int CaptureSeconds {get;set;}=60;
