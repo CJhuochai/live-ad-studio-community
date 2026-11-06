@@ -1,0 +1,31 @@
+name: Windows build and self-check
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Publish Windows x64
+        run: dotnet publish LiveAdStudio/LiveAdStudio.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o publish
+      - name: Run offline self-check
+        shell: pwsh
+        run: |
+          $report = Join-Path $env:RUNNER_TEMP 'live-ad-studio-checks.txt'
+          $process = Start-Process -FilePath './publish/LiveAdStudio.exe' -ArgumentList @('--check', ('"' + $report + '"')) -WindowStyle Hidden -Wait -PassThru
+          Get-Content $report
+          if ($process.ExitCode -ne 0) { exit $process.ExitCode }

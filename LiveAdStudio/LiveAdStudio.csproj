@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType><TargetFramework>net8.0-windows10.0.19041.0</TargetFramework><UseWindowsForms>true</UseWindowsForms>
+    <ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable><AssemblyName>LiveAdStudio</AssemblyName><Version>2.2.1</Version>
+    <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
+    <ApplicationIcon>Assets/app.ico</ApplicationIcon>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.3537.50" />
+    <PackageReference Include="Microsoft.IdentityModel.Protocols.OpenIdConnect" Version="8.16.0" />
+    <PackageReference Include="System.IdentityModel.Tokens.Jwt" Version="8.16.0" />
+    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="8.0.0" />
+    <Compile Include="../LiveAdDesk/Core.cs" Link="Finance/Core.cs" />
+    <Compile Include="../LiveAdDesk/Import.cs" Link="Finance/Import.cs" />
+    <Compile Include="../LiveAdDesk/Knowledge.cs" Link="Finance/Knowledge.cs" />
+    <Compile Include="../LiveAdDesk/SelfTest.cs" Link="Tests/FinanceChecks.cs" />
+    <Compile Include="../LiveAdConnect/Checks.cs" Link="Tests/AuthChecks.cs" />
+    <EmbeddedResource Include="Ui/index.html" />
+    <EmbeddedResource Include="Ui/decision.js" />
+    <EmbeddedResource Include="Ui/decision.css" />
+    <EmbeddedResource Include="Ui/app-logo.png" />
+    <EmbeddedResource Include="Assets/app.ico" />
+  </ItemGroup>
+  <Target Name="RemoveUnusedWebViewWpfReference" BeforeTargets="ResolveAssemblyReferences">
+    <ItemGroup><Reference Remove="@(Reference)" Condition="'%(Reference.Filename)' == 'Microsoft.Web.WebView2.Wpf'" /></ItemGroup>
+  </Target>
+</Project>
